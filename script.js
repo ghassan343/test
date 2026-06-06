@@ -54,6 +54,7 @@
     botData    = bots[0];
     botEnabled = botData.active;
 
+    // تحقق إذا كان بوت تقني
     isTechBot = botData.name && botData.name.includes("التقني");
 
     const nameEl = document.querySelector(".mnf-hname");
@@ -61,6 +62,7 @@
     if (nameEl && botData.bot_name) nameEl.textContent = botData.bot_name;
     if (avEl && botData.bot_avatar) avEl.textContent   = botData.bot_avatar;
 
+    // إظهار زر الصورة للبوت التقني
     if (isTechBot) {
       document.getElementById("mnf-img-btn").style.display = "flex";
     }
@@ -225,8 +227,10 @@
       const base64 = e.target.result.split(",")[1];
       const previewUrl = e.target.result;
 
+      // عرض الصورة في الشات
       appendMsg("user", "[IMG]" + previewUrl, fmtTime(new Date().toISOString()));
 
+      // حفظ رسالة الصورة
       await api("/messages", "POST", {
         conversation_id: convId,
         sender_type: "visitor",
@@ -249,12 +253,10 @@
             bot_id: BOT_ID,
           }),
         });
-        // انتظر WebSocket — لو ما جاء خلال 8 ثوان استخدم Polling
-        if (!wsConnected) {
-          setTimeout(() => { pollForReply(beforeCall, 0); }, 8000);
-        }
-      } catch (_) {
-        setTyping(false);
+// انتظر WebSocket — لو ما جاء خلال 8 ثوان استخدم Polling
+setTimeout(() => {
+  if (setTyping) pollForReply(beforeCall, 0);
+}, 8000);        setTyping(false);
         appendMsg("bot", "عذراً، حدث خطأ في تحليل الصورة.", fmtTime(new Date().toISOString()));
       }
     };
