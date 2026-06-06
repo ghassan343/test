@@ -1,12 +1,10 @@
 (async function () {
-  // ===== قراءة BOT_ID من script tag تلقائياً =====
   const currentScript = document.currentScript ||
     document.querySelector('script[data-bot-id]');
   const BOT_ID = currentScript ? currentScript.getAttribute("data-bot-id") : null;
 
   if (!BOT_ID) {
     console.error("Manafith Widget: أضف data-bot-id في الـ script tag");
-    console.error('مثال: <script src="widget.js" data-bot-id="YOUR_BOT_UUID"><\/script>');
     return;
   }
 
@@ -19,13 +17,13 @@
   let visitorId  = null;
   let botEnabled = true;
   let botData    = null;
+  let isTechBot  = false;
 
   // Transfer Timer State
   let transferTimer     = null;
   let transferCountdown = 0;
   let inTransfer        = false;
 
-  // تتبع الرسائل المعروضة لتجنب التكرار
   let displayedMessageIds = new Set();
   let wsConnected = false;
 
@@ -46,27 +44,29 @@
       if (!r.ok) return null;
       const text = await r.text();
       return text ? JSON.parse(text) : null;
-    } catch (err) {
-      return null;
-    }
+    } catch (_) { return null; }
   }
 
   // Init
   async function init() {
     const bots = await api(`/bots?id=eq.${BOT_ID}&select=*`);
-    if (!bots || !bots.length) {
-      console.error("Manafith Widget: البوت غير موجود");
-      return;
-    }
+    if (!bots || !bots.length) return;
     botData    = bots[0];
     botEnabled = botData.active;
+
+    // تحقق إذا كان بوت تقني
+    isTechBot = botData.name && botData.name.includes("التقني");
 
     const nameEl = document.querySelector(".mnf-hname");
     const avEl   = document.querySelector(".mnf-av");
     if (nameEl && botData.bot_name) nameEl.textContent = botData.bot_name;
     if (avEl && botData.bot_avatar) avEl.textContent   = botData.bot_avatar;
 
-    // تسجيل الزائر
+    // إظهار زر الصورة للبوت التقني
+    if (isTechBot) {
+      document.getElementById("mnf-img-btn").style.display = "flex";
+    }
+
     const vis = await api(`/visitors?bot_id=eq.${BOT_ID}&visitor_key=eq.${visitorKey}&select=id`);
     if (vis && vis.length) {
       visitorId = vis[0].id;
@@ -80,7 +80,6 @@
       if (newVis && newVis.length) visitorId = newVis[0].id;
     }
 
-    // فتح أو جلب محادثة
     const convs = await api(`/conversations?visitor_id=eq.${visitorId}&status=eq.open&order=created_at.desc&limit=1&select=id,bot_enabled`);
     if (convs && convs.length) {
       convId     = convs[0].id;
@@ -95,7 +94,6 @@
       if (newConv && newConv.length) convId = newConv[0].id;
     }
 
-    // تحميل الرسائل السابقة
     if (convId) {
       const prevMsgs = await api(`/messages?conversation_id=eq.${convId}&order=created_at.asc&select=*`);
       if (prevMsgs && prevMsgs.length) {
@@ -209,14 +207,60 @@
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
           <div style="display:flex;align-items:center;gap:7px;">
             <span style="font-size:14px;">👤</span>
-            <span style="font-size:12px;color:#cbd5e1;font-family:'IBM Plex Sans Arabic',sans-serif;">جاري تحويلك لموظف بشري</span>
+            <span style="font-size:12px;color:#cbd5e1;">جاري تحويلك لموظف بشري</span>
           </div>
-          <span style="font-size:15px;font-weight:700;color:${color};font-family:'IBM Plex Sans Arabic',sans-serif;min-width:28px;text-align:center;transition:color 0.4s;">${sec}s</span>
+          <span style="font-size:15px;font-weight:700;color:${color};min-width:28px;text-align:center;">${sec}s</span>
         </div>
         <div style="width:100%;height:5px;background:rgba(255,255,255,0.07);border-radius:99px;overflow:hidden;">
           <div style="height:100%;width:${pct}%;background:${color};border-radius:99px;transition:width 0.85s linear,background 0.5s;"></div>
         </div>
       </div>`;
+  }
+
+  // إرسال صورة للبوت التقني
+  async function sendImage(file) {
+    if (!file || !convId) return;
+    setTyping(true);
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      const base64 = e.target.result.split(",")[1];
+      const previewUrl = e.target.result;
+
+      // عرض الصورة في الشات
+      appendMsg("user", "[IMG]" + previewUrl, fmtTime(new Date().toISOString()));
+
+      // حفظ رسالة الصورة
+      await api("/messages", "POST", {
+        conversation_id: convId,
+        sender_type: "visitor",
+        sender_id: visitorId,
+        message: "أرسل صورة عطل تقني",
+        source: "widget",
+      });
+
+      await api(`/conversations?id=eq.${convId}`, "PATCH", { updated_at: new Date().toISOString() });
+
+      const beforeCall = new Date().toISOString();
+      try {
+        await fetch(`${SUPABASE_URL}/functions/v1/tech-support`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SUPABASE_KEY },
+          body: JSON.stringify({
+            message: "حلل هذا الخطأ وقدم الحل",
+            image_base64: base64,
+            conversation_id: convId,
+            bot_id: BOT_ID,
+          }),
+        });
+        if (!wsConnected) { pollForReply(beforeCall); }
+        else { setTimeout(() => pollForReply(beforeCall, 0), 3000); }
+      } catch (_) {
+        setTyping(false);
+        appendMsg("bot", "عذراً، حدث خطأ في تحليل الصورة.", fmtTime(new Date().toISOString()));
+      }
+    };
+    reader.readAsDataURL(file);
   }
 
   // Send Message
@@ -243,8 +287,9 @@
     if (isBotOn) {
       setTyping(true);
       const beforeCall = new Date().toISOString();
+      const endpoint = isTechBot ? "tech-support" : "CHAT_AI";
       try {
-        await fetch(`${SUPABASE_URL}/functions/v1/CHAT_AI`, {
+        await fetch(`${SUPABASE_URL}/functions/v1/${endpoint}`, {
           method: "POST",
           headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SUPABASE_KEY },
           body: JSON.stringify({ message: text, conversation_id: convId, bot_id: BOT_ID }),
@@ -295,6 +340,9 @@
     .mnf-row{display:flex;gap:7px;align-items:flex-end;}
     #mnf-inp{flex:1;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.09);border-radius:11px;padding:9px 13px;color:#fff;font-size:13.5px;resize:none;outline:none;max-height:90px;min-height:40px;transition:border .2s;font-family:'IBM Plex Sans Arabic',sans-serif;}
     #mnf-inp::placeholder{color:rgba(255,255,255,.25);}#mnf-inp:focus{border-color:rgba(83,52,131,.55);}
+    #mnf-img-btn{display:none;width:40px;height:40px;border-radius:11px;flex-shrink:0;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.09);cursor:pointer;align-items:center;justify-content:center;color:rgba(255,255,255,.5);transition:all .2s;}
+    #mnf-img-btn:hover{background:rgba(83,52,131,.3);color:#fff;border-color:rgba(83,52,131,.5);}
+    #mnf-img-btn svg{width:17px;height:17px;}
     #mnf-sbtn{width:40px;height:40px;border-radius:11px;flex-shrink:0;background:linear-gradient(135deg,#0f3460,#533483);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#fff;transition:all .2s;}
     #mnf-sbtn:hover{filter:brightness(1.2);}#mnf-sbtn svg{width:17px;height:17px;}
     .mnf-powered{text-align:center;font-size:10px;color:rgba(255,255,255,.15);margin-top:7px;}
@@ -326,6 +374,14 @@
       <div class="mnf-foot">
         <div class="mnf-row">
           <textarea id="mnf-inp" placeholder="اكتب رسالتك..." rows="1"></textarea>
+          <input type="file" id="mnf-img-input" accept="image/*" style="display:none"/>
+          <button id="mnf-img-btn" title="أرسل صورة العطل">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="18" height="18" rx="2"/>
+              <circle cx="8.5" cy="8.5" r="1.5"/>
+              <polyline points="21 15 16 10 5 21"/>
+            </svg>
+          </button>
           <button id="mnf-sbtn">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <line x1="22" y1="2" x2="11" y2="13"/>
@@ -347,28 +403,41 @@
   `;
   document.body.appendChild(wrap);
 
-  const fab    = document.getElementById("mnf-fab");
-  const panel  = document.getElementById("mnf-panel");
-  const msgsEl = document.getElementById("mnf-msgs");
-  const inp    = document.getElementById("mnf-inp");
-  const sbtn   = document.getElementById("mnf-sbtn");
-  const typing = document.getElementById("mnf-typing");
+  const fab       = document.getElementById("mnf-fab");
+  const panel     = document.getElementById("mnf-panel");
+  const msgsEl    = document.getElementById("mnf-msgs");
+  const inp       = document.getElementById("mnf-inp");
+  const sbtn      = document.getElementById("mnf-sbtn");
+  const typing    = document.getElementById("mnf-typing");
+  const imgBtn    = document.getElementById("mnf-img-btn");
+  const imgInput  = document.getElementById("mnf-img-input");
 
   fab.addEventListener("click", () => {
     panel.classList.toggle("open");
     fab.classList.toggle("open");
     if (panel.classList.contains("open")) { scrollEnd(); inp.focus(); }
   });
+
   sbtn.addEventListener("click", () => {
     const t = inp.value.trim();
     if (t) { inp.value = ""; inp.style.height = "auto"; sendMsg(t); }
   });
+
   inp.addEventListener("keydown", e => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sbtn.click(); }
   });
+
   inp.addEventListener("input", () => {
     inp.style.height = "auto";
     inp.style.height = Math.min(inp.scrollHeight, 90) + "px";
+  });
+
+  imgBtn.addEventListener("click", () => imgInput.click());
+
+  imgInput.addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (file) sendImage(file);
+    imgInput.value = "";
   });
 
   function appendMsg(role, text, time, anim = true) {
