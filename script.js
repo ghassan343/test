@@ -253,8 +253,7 @@
             bot_id: BOT_ID,
           }),
         });
-       setTimeout(() => pollForReply(beforeCall, 0), 1000);
-      } catch (_) {
+setTimeout(() => pollForReply(beforeCall, 0), 4000);      } catch (_) {
         setTyping(false);
         appendMsg("bot", "عذراً، حدث خطأ في تحليل الصورة.", fmtTime(new Date().toISOString()));
       }
