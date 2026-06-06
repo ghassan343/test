@@ -253,8 +253,10 @@
             bot_id: BOT_ID,
           }),
         });
-setTimeout(() => pollForReply(beforeCall, 0), 4000);      } catch (_) {
-        setTyping(false);
+// انتظر WebSocket — لو ما جاء خلال 8 ثوان استخدم Polling
+setTimeout(() => {
+  if (setTyping) pollForReply(beforeCall, 0);
+}, 8000);        setTyping(false);
         appendMsg("bot", "عذراً، حدث خطأ في تحليل الصورة.", fmtTime(new Date().toISOString()));
       }
     };
