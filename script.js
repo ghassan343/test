@@ -1,4 +1,4 @@
-](async function () {
+(async function () {
   const currentScript = document.currentScript ||
     document.querySelector('script[data-bot-id]');
   const BOT_ID = currentScript ? currentScript.getAttribute("data-bot-id") : null;
