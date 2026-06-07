@@ -1,4 +1,4 @@
-(async function () {
+](async function () {
   const currentScript = document.currentScript ||
     document.querySelector('script[data-bot-id]');
   const BOT_ID = currentScript ? currentScript.getAttribute("data-bot-id") : null;
@@ -11,23 +11,11 @@
   const SUPABASE_URL = "https://ogbvovjzfjbdzutingqi.supabase.co";
   const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9nYnZvdmp6ZmpiZHp1dGluZ3FpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAzMzk1ODYsImV4cCI6MjA5NTkxNTU4Nn0.Ac5qLMfMO_83aIXdwXw-smy0S1oevV28olhGcUQPXiM";
 
-  // State
   const visitorKey = "v_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7);
-  let convId     = null;
-  let visitorId  = null;
-  let botEnabled = true;
-  let botData    = null;
-  let isTechBot  = false;
+  let convId = null, visitorId = null, botEnabled = true, botData = null, isTechBot = false;
+  let transferTimer = null, transferCountdown = 0, inTransfer = false;
+  let displayedMessageIds = new Set(), wsConnected = false;
 
-  // Transfer Timer State
-  let transferTimer     = null;
-  let transferCountdown = 0;
-  let inTransfer        = false;
-
-  let displayedMessageIds = new Set();
-  let wsConnected = false;
-
-  // API Helper
   async function api(path, method = "GET", body = null) {
     const opts = {
       method,
@@ -47,33 +35,25 @@
     } catch (_) { return null; }
   }
 
-  // Init
   async function init() {
     const bots = await api(`/bots?id=eq.${BOT_ID}&select=*`);
     if (!bots || !bots.length) return;
-    botData    = bots[0];
+    botData = bots[0];
     botEnabled = botData.active;
-
-    // تحقق إذا كان بوت تقني
     isTechBot = botData.name && botData.name.includes("التقني");
 
     const nameEl = document.querySelector(".mnf-hname");
-    const avEl   = document.querySelector(".mnf-av");
+    const avEl = document.querySelector(".mnf-av");
     if (nameEl && botData.bot_name) nameEl.textContent = botData.bot_name;
-    if (avEl && botData.bot_avatar) avEl.textContent   = botData.bot_avatar;
-
-    // إظهار زر الصورة للبوت التقني
-    if (isTechBot) {
-      document.getElementById("mnf-img-btn").style.display = "flex";
-    }
+    if (avEl && botData.bot_avatar) avEl.textContent = botData.bot_avatar;
+    if (isTechBot) document.getElementById("mnf-img-btn").style.display = "flex";
 
     const vis = await api(`/visitors?bot_id=eq.${BOT_ID}&visitor_key=eq.${visitorKey}&select=id`);
     if (vis && vis.length) {
       visitorId = vis[0].id;
     } else {
       const newVis = await api("/visitors", "POST", {
-        bot_id: BOT_ID,
-        visitor_key: visitorKey,
+        bot_id: BOT_ID, visitor_key: visitorKey,
         name: "زائر " + visitorKey.slice(-4),
         browser: navigator.userAgent.slice(0, 60),
       });
@@ -82,14 +62,10 @@
 
     const convs = await api(`/conversations?visitor_id=eq.${visitorId}&status=eq.open&order=created_at.desc&limit=1&select=id,bot_enabled`);
     if (convs && convs.length) {
-      convId     = convs[0].id;
-      botEnabled = convs[0].bot_enabled;
+      convId = convs[0].id; botEnabled = convs[0].bot_enabled;
     } else {
       const newConv = await api("/conversations", "POST", {
-        bot_id: BOT_ID,
-        visitor_id: visitorId,
-        bot_enabled: botEnabled,
-        status: "open",
+        bot_id: BOT_ID, visitor_id: visitorId, bot_enabled: botEnabled, status: "open",
       });
       if (newConv && newConv.length) convId = newConv[0].id;
     }
@@ -109,22 +85,15 @@
     }
   }
 
-  // Realtime
   function subscribeRealtime() {
     try {
-      const ws = new WebSocket(
-        `${SUPABASE_URL.replace("https", "wss")}/realtime/v1/websocket?apikey=${SUPABASE_KEY}&vsn=1.0.0`
-      );
+      const ws = new WebSocket(`${SUPABASE_URL.replace("https", "wss")}/realtime/v1/websocket?apikey=${SUPABASE_KEY}&vsn=1.0.0`);
       ws.onopen = () => {
         wsConnected = true;
-        ws.send(JSON.stringify({
-          topic: "realtime:public:messages:conversation_id=eq." + convId,
-          event: "phx_join", payload: {}, ref: "1"
-        }));
+        ws.send(JSON.stringify({ topic: "realtime:public:messages:conversation_id=eq." + convId, event: "phx_join", payload: {}, ref: "1" }));
         const hb = setInterval(() => {
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ topic: "phoenix", event: "heartbeat", payload: {}, ref: "hb" }));
-          } else { clearInterval(hb); }
+          if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ topic: "phoenix", event: "heartbeat", payload: {}, ref: "hb" }));
+          else clearInterval(hb);
         }, 25000);
       };
       ws.onmessage = (e) => {
@@ -148,13 +117,10 @@
     } catch (_) { wsConnected = false; }
   }
 
-  // Polling Fallback
   async function pollForReply(afterTimestamp, attempts = 0) {
     if (attempts > 20) { setTyping(false); return; }
     await new Promise(r => setTimeout(r, 500));
-    const msgs = await api(
-      `/messages?conversation_id=eq.${convId}&sender_type=neq.visitor&created_at=gt.${afterTimestamp}&order=created_at.asc&select=*`
-    );
+    const msgs = await api(`/messages?conversation_id=eq.${convId}&sender_type=neq.visitor&created_at=gt.${afterTimestamp}&order=created_at.asc&select=*`);
     if (msgs && msgs.length) {
       setTyping(false);
       msgs.forEach(msg => {
@@ -167,7 +133,6 @@
     } else { pollForReply(afterTimestamp, attempts + 1); }
   }
 
-  // Transfer Timer
   function startTransferTimer() {
     if (inTransfer) return;
     inTransfer = true; transferCountdown = 30;
@@ -217,73 +182,47 @@
       </div>`;
   }
 
-  // إرسال صورة للبوت التقني
   async function sendImage(file) {
     if (!file || !convId) return;
     setTyping(true);
-
     const reader = new FileReader();
     reader.onload = async (e) => {
-      const base64 = e.target.result.split(",")[1];
-      const previewUrl = e.target.result;
-
-      // عرض الصورة في الشات
-      appendMsg("user", "[IMG]" + previewUrl, fmtTime(new Date().toISOString()));
-
-      // حفظ رسالة الصورة
-      await api("/messages", "POST", {
-        conversation_id: convId,
-        sender_type: "visitor",
-        sender_id: visitorId,
-        message: "أرسل صورة عطل تقني",
-        source: "widget",
-      });
-
-      await api(`/conversations?id=eq.${convId}`, "PATCH", { updated_at: new Date().toISOString() });
-
-      const beforeCall = new Date().toISOString();
       try {
+        const base64 = e.target.result.split(",")[1];
+        const previewUrl = e.target.result;
+        appendMsg("user", "[IMG]" + previewUrl, fmtTime(new Date().toISOString()));
+        await api("/messages", "POST", {
+          conversation_id: convId, sender_type: "visitor",
+          sender_id: visitorId, message: "أرسل صورة عطل تقني", source: "widget",
+        });
+        await api(`/conversations?id=eq.${convId}`, "PATCH", { updated_at: new Date().toISOString() });
+        const beforeCall = new Date().toISOString();
         await fetch(`${SUPABASE_URL}/functions/v1/tech-support`, {
           method: "POST",
           headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SUPABASE_KEY },
-          body: JSON.stringify({
-            message: "حلل هذا الخطأ وقدم الحل",
-            image_base64: base64,
-            conversation_id: convId,
-            bot_id: BOT_ID,
-          }),
+          body: JSON.stringify({ message: "حلل هذا الخطأ وقدم الحل", image_base64: base64, conversation_id: convId, bot_id: BOT_ID }),
         });
-// انتظر WebSocket — لو ما جاء خلال 8 ثوان استخدم Polling
-setTimeout(() => {
-  if (setTyping) pollForReply(beforeCall, 0);
-}, 8000);        setTyping(false);
+        setTimeout(() => pollForReply(beforeCall, 0), 2000);
+      } catch (_) {
+        setTyping(false);
         appendMsg("bot", "عذراً، حدث خطأ في تحليل الصورة.", fmtTime(new Date().toISOString()));
       }
     };
     reader.readAsDataURL(file);
   }
 
-  // Send Message
   async function sendMsg(text) {
     if (!convId || !text.trim()) return;
     const sendTime = new Date().toISOString();
     appendMsg("user", text, fmtTime(sendTime));
-
     const sentMsg = await api("/messages", "POST", {
-      conversation_id: convId,
-      sender_type: "visitor",
-      sender_id: visitorId,
-      message: text,
-      source: "widget",
+      conversation_id: convId, sender_type: "visitor", sender_id: visitorId, message: text, source: "widget",
     });
     if (sentMsg && sentMsg.length && sentMsg[0].id) displayedMessageIds.add(sentMsg[0].id);
-
     await api(`/conversations?id=eq.${convId}`, "PATCH", { updated_at: new Date().toISOString() });
     if (inTransfer) return;
-
     const convData = await api(`/conversations?id=eq.${convId}&select=bot_enabled`);
-    const isBotOn  = convData && convData.length ? convData[0].bot_enabled : botEnabled;
-
+    const isBotOn = convData && convData.length ? convData[0].bot_enabled : botEnabled;
     if (isBotOn) {
       setTyping(true);
       const beforeCall = new Date().toISOString();
@@ -294,8 +233,8 @@ setTimeout(() => {
           headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SUPABASE_KEY },
           body: JSON.stringify({ message: text, conversation_id: convId, bot_id: BOT_ID }),
         });
-        if (!wsConnected) { pollForReply(beforeCall); }
-        else { setTimeout(() => pollForReply(beforeCall, 0), 3000); }
+        if (!wsConnected) pollForReply(beforeCall);
+        else setTimeout(() => pollForReply(beforeCall, 0), 3000);
       } catch (_) {
         setTyping(false);
         appendMsg("bot", "عذراً، حدث خطأ في الاتصال.", fmtTime(new Date().toISOString()));
@@ -303,7 +242,6 @@ setTimeout(() => {
     }
   }
 
-  // Styles
   const style = document.createElement("style");
   style.textContent = `
     @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600&display=swap');
@@ -350,7 +288,6 @@ setTimeout(() => {
   `;
   document.head.appendChild(style);
 
-  // HTML
   const wrap = document.createElement("div");
   wrap.id = "mnf-w";
   wrap.innerHTML = `
@@ -403,37 +340,32 @@ setTimeout(() => {
   `;
   document.body.appendChild(wrap);
 
-  const fab       = document.getElementById("mnf-fab");
-  const panel     = document.getElementById("mnf-panel");
-  const msgsEl    = document.getElementById("mnf-msgs");
-  const inp       = document.getElementById("mnf-inp");
-  const sbtn      = document.getElementById("mnf-sbtn");
-  const typing    = document.getElementById("mnf-typing");
-  const imgBtn    = document.getElementById("mnf-img-btn");
-  const imgInput  = document.getElementById("mnf-img-input");
+  const fab = document.getElementById("mnf-fab");
+  const panel = document.getElementById("mnf-panel");
+  const msgsEl = document.getElementById("mnf-msgs");
+  const inp = document.getElementById("mnf-inp");
+  const sbtn = document.getElementById("mnf-sbtn");
+  const typing = document.getElementById("mnf-typing");
+  const imgBtn = document.getElementById("mnf-img-btn");
+  const imgInput = document.getElementById("mnf-img-input");
 
   fab.addEventListener("click", () => {
     panel.classList.toggle("open");
     fab.classList.toggle("open");
     if (panel.classList.contains("open")) { scrollEnd(); inp.focus(); }
   });
-
   sbtn.addEventListener("click", () => {
     const t = inp.value.trim();
     if (t) { inp.value = ""; inp.style.height = "auto"; sendMsg(t); }
   });
-
   inp.addEventListener("keydown", e => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sbtn.click(); }
   });
-
   inp.addEventListener("input", () => {
     inp.style.height = "auto";
     inp.style.height = Math.min(inp.scrollHeight, 90) + "px";
   });
-
   imgBtn.addEventListener("click", () => imgInput.click());
-
   imgInput.addEventListener("change", (e) => {
     const file = e.target.files[0];
     if (file) sendImage(file);
